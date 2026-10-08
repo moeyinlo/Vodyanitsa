@@ -93,8 +93,9 @@ def _pitch_for_key_index(index: int, profile: InstrumentProfile) -> int:
 def _nearest_chord(
     notes: list[NoteSpan], transpose: int, *, allow_partial: bool = False
 ) -> str | None:
-    source_pitches = frozenset((note.pitch + transpose) % 12 for note in notes)
-    if not source_pitches or (len(source_pitches) < 3 and not allow_partial):
+    source_pitches = tuple((note.pitch + transpose) % 12 for note in notes)
+    unique_pitches = frozenset(source_pitches)
+    if not source_pitches or (len(unique_pitches) < 3 and not allow_partial):
         return None
 
     def pitch_class_distance(left: int, right: int) -> int:
@@ -108,7 +109,7 @@ def _nearest_chord(
             for source in source_pitches
         )
         chord_to_source = sum(
-            min(pitch_class_distance(target, source) for source in source_pitches)
+            min(pitch_class_distance(target, source) for source in unique_pitches)
             for target in intervals
         )
         candidates.append((source_to_chord + chord_to_source, chord_name))
@@ -118,7 +119,8 @@ def _nearest_chord(
 def _nearest_scale_chord(
     notes: list[NoteSpan], transpose: int, profile: InstrumentProfile
 ) -> frozenset[int]:
-    source = frozenset((note.pitch + transpose) % 12 for note in notes)
+    source = tuple((note.pitch + transpose) % 12 for note in notes)
+    unique_source = frozenset(source)
     intervals = profile.scale_intervals
     candidates = {
         frozenset(
@@ -140,7 +142,10 @@ def _nearest_scale_chord(
         candidates,
         key=lambda chord: (
             sum(min(distance(pitch, target) for target in chord) for pitch in source)
-            + sum(min(distance(target, pitch) for pitch in source) for target in chord),
+            + sum(
+                min(distance(target, pitch) for pitch in unique_source)
+                for target in chord
+            ),
             tuple(sorted(chord)),
         ),
     )
@@ -267,7 +272,7 @@ def map_notes(
             pitches = ", ".join(str(note.pitch + transpose) for note in group)
             if approximate:
                 chord_name = (
-                    _nearest_chord(group, transpose)
+                    _nearest_chord(group, transpose, allow_partial=True)
                     if approximation_mode == "chord"
                     else None
                 )

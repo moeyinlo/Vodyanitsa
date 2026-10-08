@@ -159,6 +159,24 @@ def test_chord_approximation_turns_isolated_chromatic_note_into_chord():
     assert len(single.spans[0].keys) == 1
 
 
+def test_nearest_guitar_chord_weights_repeated_octave_doubled_tones():
+    notes = [NoteSpan(0, 0.5, pitch) for pitch in (60, 62, 74)]
+
+    result = map_notes(notes, "guitar", approximation_mode="chord")
+
+    assert len(result.spans) == 1
+    assert result.spans[0].keys == ("T",)
+    assert result.spans[0].label == "\u8fd1\u4f3c\u548c\u5f26 G"
+
+
+def test_nearest_scale_chord_weights_repeated_pitch_classes():
+    notes = [NoteSpan(0, 0.5, pitch) for pitch in (60, 72, 63, 65)]
+
+    result = map_notes(notes, "standard", approximation_mode="chord")
+
+    assert {span.keys for span in result.spans} == {("A",), ("Q",), ("D",)}
+
+
 def test_auto_transposition_finds_nearest_shift_into_instrument_scale():
     f_sharp_major = [NoteSpan(0, 0.5, pitch) for pitch in (66, 68, 70, 71, 73, 75, 77)]
 
