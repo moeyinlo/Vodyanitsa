@@ -63,6 +63,50 @@ class WindowsKeySink:
     def key_up(self, key: str) -> None:
         self._send(key, True)
 
+    def key_events(self, transitions: list[tuple[str, bool]]) -> None:
+        if not transitions:
+            return
+        inputs = (_INPUT * len(transitions))(
+            *(
+                _INPUT(
+                    type=INPUT_KEYBOARD,
+                    ki=_KEYBDINPUT(
+                        key_to_virtual_key(key),
+                        0,
+                        0 if is_down else KEYEVENTF_KEYUP,
+                        0,
+                        0,
+                    ),
+                )
+                for key, is_down in transitions
+            )
+        )
+        sent = self._user32.SendInput(len(transitions), inputs, ctypes.sizeof(_INPUT))
+        if sent == len(transitions):
+            return
+
+        inserted_downs = [
+            key for key, is_down in transitions[:sent] if is_down
+        ]
+        if inserted_downs:
+            cleanup = (_INPUT * len(inserted_downs))(
+                *(
+                    _INPUT(
+                        type=INPUT_KEYBOARD,
+                        ki=_KEYBDINPUT(
+                            key_to_virtual_key(key), 0, KEYEVENTF_KEYUP, 0, 0
+                        ),
+                    )
+                    for key in inserted_downs
+                )
+            )
+            self._user32.SendInput(
+                len(inserted_downs), cleanup, ctypes.sizeof(_INPUT)
+            )
+        raise OSError(
+            f"SendInput accepted {sent} of {len(transitions)} keyboard events."
+        )
+
     def _send(self, key: str, is_key_up: bool) -> None:
         flags = KEYEVENTF_KEYUP if is_key_up else 0
         event = _INPUT(

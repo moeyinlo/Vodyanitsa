@@ -26,6 +26,18 @@ class FakeSink:
         self.events.append(("up", key))
 
 
+class BatchSink(FakeSink):
+    def __init__(self):
+        super().__init__()
+        self.batches = []
+
+    def key_events(self, transitions):
+        batch = tuple(transitions)
+        self.batches.append(batch)
+        for key, is_down in batch:
+            self.events.append(("down" if is_down else "up", key))
+
+
 
 def test_play_pause_resume_and_duration_release_keys():
     clock = FakeClock()
@@ -90,6 +102,66 @@ def test_overlapping_spans_do_not_release_a_shared_key_early():
     clock.advance(0.25)
     engine.tick()
     assert sink.events == [("down", "A"), ("up", "A")]
+
+
+def test_simultaneous_chord_key_transitions_are_batched():
+    clock = FakeClock()
+    sink = BatchSink()
+    engine = PlaybackEngine(sink, clock=clock)
+    engine.load([MappedSpan(0, 0.5, ("Q", "W", "E"))], duration=1)
+
+    engine.play()
+    engine.tick()
+    clock.advance(0.5)
+    engine.tick()
+
+    assert sink.batches == [
+        (("E", True), ("Q", True), ("W", True)),
+        (("E", False), ("Q", False), ("W", False)),
+    ]
+
+
+def test_batched_same_key_retrigger_releases_then_presses_at_shared_timestamp():
+    clock = FakeClock()
+    sink = BatchSink()
+    engine = PlaybackEngine(sink, clock=clock)
+    engine.load(
+        [MappedSpan(0, 0.5, ("A",)), MappedSpan(0.5, 1, ("A",))],
+        duration=1,
+    )
+
+    engine.play()
+    engine.tick()
+    clock.advance(0.5)
+    engine.tick()
+
+    assert sink.batches == [(("A", True),), (("A", False), ("A", True))]
+
+
+def test_failed_batch_remains_pending_for_retry():
+    class RetryBatchSink(BatchSink):
+        def __init__(self):
+            super().__init__()
+            self.fail_once = True
+
+        def key_events(self, transitions):
+            if self.fail_once:
+                self.fail_once = False
+                raise OSError("simulated input failure")
+            super().key_events(transitions)
+
+    sink = RetryBatchSink()
+    engine = PlaybackEngine(sink, clock=FakeClock())
+    engine.load([MappedSpan(0, 0.5, ("A",))], duration=1)
+    engine.play()
+
+    with pytest.raises(OSError, match="simulated input failure"):
+        engine.tick()
+
+    engine.tick()
+
+    assert sink.batches == [(("A", True),)]
+    assert sink.events == [("down", "A")]
 
 
 

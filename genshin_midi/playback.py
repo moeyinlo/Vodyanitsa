@@ -90,17 +90,49 @@ class PlaybackEngine:
             return self.position
         target = min(self.duration, max(self.position, self.clock() - self._started_at))
         while self._event_index < len(self._events) and self._events[self._event_index][0] <= target:
-            _, is_start, _, key = self._events[self._event_index]
-            if is_start:
-                self._press(key)
-            else:
-                self._release(key)
-            self._event_index += 1
+            timestamp = self._events[self._event_index][0]
+            group = []
+            group_end = self._event_index
+            while group_end < len(self._events) and self._events[group_end][0] == timestamp:
+                group.append(self._events[group_end])
+                group_end += 1
+            self._process_event_group(group)
+            self._event_index = group_end
         self.position = target
         if self.position >= self.duration:
             self._release_all()
             self.state = PlaybackState.FINISHED
         return self.position
+
+    def _process_event_group(
+        self, events: list[tuple[float, int, MappedSpan, str]]
+    ) -> None:
+        batch_sender = getattr(self.sink, "key_events", None)
+        if not callable(batch_sender):
+            for _, is_start, _, key in events:
+                if is_start:
+                    self._press(key)
+                else:
+                    self._release(key)
+            return
+
+        counts = self._key_counts.copy()
+        transitions = []
+        for _, is_start, _, key in events:
+            count = counts.get(key, 0)
+            if is_start:
+                if count == 0:
+                    transitions.append((key, True))
+                counts[key] = count + 1
+            else:
+                if count <= 1:
+                    if count:
+                        transitions.append((key, False))
+                    counts.pop(key, None)
+                else:
+                    counts[key] = count - 1
+        batch_sender(transitions)
+        self._key_counts = counts
 
     def _press(self, key: str) -> None:
         count = self._key_counts.get(key, 0)
